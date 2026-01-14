@@ -81,6 +81,27 @@ async fn handler(
                 Err(e) => e.into_response(),
             }
         }
+        "AmazonSQS.SendMessage" => {
+            let request: queue::SendMessageRequest = serde_json::from_str(&body).unwrap();
+            match queue::send_message(State(state), Json(request)).await {
+                Ok(response) => Json(response).into_response(),
+                Err(e) => e.into_response(),
+            }
+        }
+        "AmazonSQS.ReceiveMessage" => {
+            let request: queue::ReceiveMessageRequest = serde_json::from_str(&body).unwrap();
+            match queue::receive_message(State(state), Json(request)).await {
+                Ok(response) => Json(response).into_response(),
+                Err(e) => e.into_response(),
+            }
+        }
+        "AmazonSQS.DeleteMessage" => {
+            let request: queue::DeleteMessageRequest = serde_json::from_str(&body).unwrap();
+            match queue::delete_message(State(state), Json(request)).await {
+                Ok(_) => Json(()).into_response(),
+                Err(e) => e.into_response(),
+            }
+        }
         _ => {
             let error = error::SqsError::InvalidAction(target.to_string());
             error.into_response()

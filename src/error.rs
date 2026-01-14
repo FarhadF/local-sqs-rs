@@ -8,6 +8,7 @@ pub enum SqsError {
     QueueDoesNotExist,
     InvalidParameterValue(String),
     InvalidAction(String),
+    MessageNotInflight,
     // ... other errors
 }
 
@@ -31,6 +32,11 @@ impl IntoResponse for SqsError {
                 StatusCode::BAD_REQUEST,
                 "InvalidAction",
                 format!("Invalid action: {}", action),
+            ),
+            SqsError::MessageNotInflight => (
+                StatusCode::BAD_REQUEST,
+                "MessageNotInflight",
+                "The specified message is not in flight.".to_string(),
             ),
         };
 

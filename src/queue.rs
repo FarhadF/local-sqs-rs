@@ -41,12 +41,31 @@ pub async fn create_queue(
         }
     }
 
+    let mut attributes = request.attributes;
+    attributes
+        .entry("VisibilityTimeout".to_string())
+        .or_insert("30".to_string());
+    attributes
+        .entry("DelaySeconds".to_string())
+        .or_insert("0".to_string());
+    attributes
+        .entry("MaximumMessageSize".to_string())
+        .or_insert("262144".to_string());
+    attributes
+        .entry("MessageRetentionPeriod".to_string())
+        .or_insert("345600".to_string());
+    attributes
+        .entry("ReceiveMessageWaitTimeSeconds".to_string())
+        .or_insert("0".to_string());
+
+    let now = Utc::now().timestamp();
     let new_queue = Queue {
         name: queue_name,
         url: queue_url.clone(),
         messages: Default::default(),
-        attributes: request.attributes,
-        created_timestamp: Utc::now(),
+        attributes,
+        created_timestamp: now,
+        last_modified_timestamp: now,
     };
 
     state.queues.insert(queue_url.clone(), new_queue);
@@ -130,15 +149,78 @@ pub async fn get_queue_attributes(
     match state.queues.get(&request.queue_url) {
         Some(queue) => {
             let mut attributes = HashMap::new();
-            if let Some(attribute_names) = &request.attribute_names {
-                for attr_name in attribute_names {
+            let requested_attributes =
+                request.attribute_names.unwrap_or_else(|| vec!["All".to_string()]);
+
+            let all_requested = requested_attributes.contains(&"All".to_string());
+
+            if all_requested {
+                for (key, value) in &queue.attributes {
+                    attributes.insert(key.clone(), value.clone());
+                }
+            } else {
+                for attr_name in &requested_attributes {
                     if let Some(value) = queue.attributes.get(attr_name) {
                         attributes.insert(attr_name.clone(), value.clone());
                     }
                 }
-            } else {
-                attributes = queue.attributes.clone();
             }
+
+            if all_requested
+                || requested_attributes.contains(&"ApproximateNumberOfMessages".to_string())
+            {
+                attributes.insert(
+                    "ApproximateNumberOfMessages".to_string(),
+                    queue.messages.len().to_string(),
+                );
+            }
+            if all_requested
+                || requested_attributes.contains(&"ApproximateNumberOfMessagesDelayed".to_string())
+            {
+                let count = queue
+                    .messages
+                    .iter()
+                    .filter(|m| m.receipt_handle.is_none() && m.visible_from > Utc::now())
+                    .count();
+                attributes.insert(
+                    "ApproximateNumberOfMessagesDelayed".to_string(),
+                    count.to_string(),
+                );
+            }
+            if all_requested
+                || requested_attributes
+                    .contains(&"ApproximateNumberOfMessagesNotVisible".to_string())
+            {
+                let count = queue
+                    .messages
+                    .iter()
+                    .filter(|m| m.receipt_handle.is_some() && m.visible_from > Utc::now())
+                    .count();
+                attributes.insert(
+                    "ApproximateNumberOfMessagesNotVisible".to_string(),
+                    count.to_string(),
+                );
+            }
+            if all_requested || requested_attributes.contains(&"CreatedTimestamp".to_string()) {
+                attributes.insert(
+                    "CreatedTimestamp".to_string(),
+                    queue.created_timestamp.to_string(),
+                );
+            }
+            if all_requested || requested_attributes.contains(&"LastModifiedTimestamp".to_string())
+            {
+                attributes.insert(
+                    "LastModifiedTimestamp".to_string(),
+                    queue.last_modified_timestamp.to_string(),
+                );
+            }
+            if all_requested || requested_attributes.contains(&"QueueArn".to_string()) {
+                attributes.insert(
+                    "QueueArn".to_string(),
+                    format!("arn:aws:sqs:local:000000000000:{}", queue.name),
+                );
+            }
+
             Ok(GetQueueAttributesResponse { attributes })
         }
         None => Err(SqsError::QueueDoesNotExist),

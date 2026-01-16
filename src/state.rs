@@ -36,7 +36,8 @@ pub struct Queue {
     pub url: String,
     pub messages: VecDeque<Message>,
     pub attributes: HashMap<String, String>,
-    pub created_timestamp: DateTime<Utc>,
+    pub created_timestamp: i64,
+    pub last_modified_timestamp: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

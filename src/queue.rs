@@ -434,3 +434,91 @@ pub async fn receive_message(
         messages: Vec::new(),
     })
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct AddPermissionRequest {
+    pub queue_url: String,
+    pub label: String,
+    #[serde(rename = "AWSAccountIds")]
+    pub aws_account_ids: Vec<String>,
+    pub actions: Vec<String>,
+}
+
+pub async fn add_permission(
+    State(state): State<AppState>,
+    Json(request): Json<AddPermissionRequest>,
+) -> Result<(), SqsError> {
+    match state.queues.get_mut(&request.queue_url) {
+        Some(mut queue) => {
+            let queue_name = queue.name.clone();
+            let policy_str = queue
+                .attributes
+                .entry("Policy".to_string())
+                .or_insert_with(|| {
+                    serde_json::to_string(&serde_json::json!({
+                        "Version": "2012-10-17",
+                        "Statement": []
+                    }))
+                    .unwrap()
+                });
+
+            let mut policy: serde_json::Value =
+                serde_json::from_str(policy_str).unwrap_or_else(|_| {
+                    serde_json::json!({
+                        "Version": "2012-10-17",
+                        "Statement": []
+                    })
+                });
+
+            if !policy["Statement"].is_array() {
+                policy["Statement"] = serde_json::json!([
+                ]);
+            }
+
+            let statement = serde_json::json!({
+                "Sid": request.label,
+                "Effect": "Allow",
+                "Principal": {
+                    "AWS": request.aws_account_ids
+                },
+                "Action": request.actions,
+                "Resource": format!("arn:aws:sqs:local:000000000000:{}", queue_name)
+            });
+
+            policy["Statement"]
+                .as_array_mut()
+                .unwrap()
+                .push(statement);
+
+            *policy_str = serde_json::to_string(&policy).unwrap();
+
+            queue.last_modified_timestamp = Utc::now().timestamp();
+            Ok(())
+        }
+        None => Err(SqsError::QueueDoesNotExist),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct SetQueueAttributesRequest {
+    pub queue_url: String,
+    pub attributes: HashMap<String, String>,
+}
+
+pub async fn set_queue_attributes(
+    State(state): State<AppState>,
+    Json(request): Json<SetQueueAttributesRequest>,
+) -> Result<(), SqsError> {
+    match state.queues.get_mut(&request.queue_url) {
+        Some(mut queue) => {
+            for (key, value) in request.attributes {
+                queue.attributes.insert(key, value);
+            }
+            queue.last_modified_timestamp = Utc::now().timestamp();
+            Ok(())
+        }
+        None => Err(SqsError::QueueDoesNotExist),
+    }
+}

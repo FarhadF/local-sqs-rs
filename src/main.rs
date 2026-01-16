@@ -102,6 +102,20 @@ async fn handler(
                 Err(e) => e.into_response(),
             }
         }
+        "AmazonSQS.SetQueueAttributes" => {
+            let request: queue::SetQueueAttributesRequest = serde_json::from_str(&body).unwrap();
+            match queue::set_queue_attributes(State(state), Json(request)).await {
+                Ok(_) => Json(()).into_response(),
+                Err(e) => e.into_response(),
+            }
+        }
+        "AmazonSQS.AddPermission" => {
+            let request: queue::AddPermissionRequest = serde_json::from_str(&body).unwrap();
+            match queue::add_permission(State(state), Json(request)).await {
+                Ok(_) => Json(()).into_response(),
+                Err(e) => e.into_response(),
+            }
+        }
         _ => {
             let error = error::SqsError::InvalidAction(target.to_string());
             error.into_response()

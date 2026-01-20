@@ -58,6 +58,21 @@ pub async fn create_queue(
         .entry("ReceiveMessageWaitTimeSeconds".to_string())
         .or_insert("0".to_string());
 
+    use crate::state::RedrivePolicy;
+
+    let redrive_policy = match attributes.get("RedrivePolicy") {
+        Some(policy_str) => match serde_json::from_str::<RedrivePolicy>(policy_str) {
+            Ok(policy) => Some(policy),
+            Err(e) => {
+                return Err(SqsError::InvalidParameterValue(format!(
+                    "Invalid value for RedrivePolicy: {}",
+                    e
+                )))
+            }
+        },
+        None => None,
+    };
+
     let now = Utc::now().timestamp();
     let new_queue = Queue {
         name: queue_name,
@@ -66,6 +81,7 @@ pub async fn create_queue(
         attributes,
         created_timestamp: now,
         last_modified_timestamp: now,
+        redrive_policy,
     };
 
     state.queues.insert(queue_url.clone(), new_queue);
@@ -370,57 +386,89 @@ pub async fn receive_message(
     let start_time = Utc::now();
 
     loop {
-        match state.queues.get_mut(&request.queue_url) {
-            Some(mut queue) => {
-                let now = Utc::now();
+        let redrive_policy;
+        let dead_letter_target_arn;
+        let mut messages_to_move = Vec::new();
+        let mut messages_to_return = Vec::new();
 
-                // Reset visibility for messages that have timed out
-                for message in queue.messages.iter_mut() {
-                    if message.receipt_handle.is_some() && now >= message.visible_from {
-                        message.receipt_handle = None;
-                    }
-                }
+        if let Some(mut queue) = state.queues.get_mut(&request.queue_url) {
+            let now = Utc::now();
 
-                let mut messages_to_return = Vec::new();
-                let visibility_timeout_attr = queue
-                    .attributes
-                    .get("VisibilityTimeout")
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(30);
-
-                for message in queue.messages.iter_mut() {
-                    println!(
-                        "Checking message {}: receipt_handle={:?}, visible_from={}",
-                        message.id, message.receipt_handle, message.visible_from
-                    );
-                    if messages_to_return.len() >= request.max_number_of_messages as usize {
-                        break;
-                    }
-
-                    if message.receipt_handle.is_none() && now >= message.visible_from {
-                        let mut message_clone = message.clone();
-
-                        let visibility_timeout =
-                            request.visibility_timeout.unwrap_or(visibility_timeout_attr);
-
-                        message.visible_from =
-                            Utc::now() + chrono::Duration::seconds(visibility_timeout as i64);
-                        
-                        let receipt_handle = Uuid::new_v4().to_string();
-                        message.receipt_handle = Some(receipt_handle.clone());
-                        message_clone.receipt_handle = Some(receipt_handle);
-
-                        messages_to_return.push(message_clone);
-                    }
-                }
-
-                if !messages_to_return.is_empty() {
-                    return Ok(ReceiveMessageResponse {
-                        messages: messages_to_return,
-                    });
+            // Reset visibility for messages that have timed out
+            for message in queue.messages.iter_mut() {
+                if message.receipt_handle.is_some() && now >= message.visible_from {
+                    message.receipt_handle = None;
                 }
             }
-            None => return Err(SqsError::QueueDoesNotExist),
+
+            let visibility_timeout_attr = queue
+                .attributes
+                .get("VisibilityTimeout")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(30);
+
+            redrive_policy = queue.redrive_policy.clone();
+            if let Some(rp) = &redrive_policy {
+                dead_letter_target_arn = Some(rp.dead_letter_target_arn.clone());
+            } else {
+                dead_letter_target_arn = None;
+            }
+
+            let max_messages = request.max_number_of_messages as usize;
+            let mut retained_messages = std::collections::VecDeque::new();
+            for mut message in queue.messages.drain(..) {
+                if messages_to_return.len() >= max_messages {
+                    retained_messages.push_back(message);
+                    continue;
+                }
+
+                if message.receipt_handle.is_none() && now >= message.visible_from {
+                    message.receive_count += 1;
+
+                    if let Some(rp) = &redrive_policy {
+                        if message.receive_count >= rp.max_receive_count {
+                            messages_to_move.push(message);
+                            continue;
+                        }
+                    }
+
+                    let mut message_clone = message.clone();
+
+                    let visibility_timeout =
+                        request.visibility_timeout.unwrap_or(visibility_timeout_attr);
+
+                    message.visible_from =
+                        Utc::now() + chrono::Duration::seconds(visibility_timeout as i64);
+
+                    let receipt_handle = Uuid::new_v4().to_string();
+                    message.receipt_handle = Some(receipt_handle.clone());
+                    message_clone.receipt_handle = Some(receipt_handle);
+
+                    messages_to_return.push(message_clone);
+                }
+                retained_messages.push_back(message);
+            }
+            queue.messages = retained_messages;
+        } else {
+            return Err(SqsError::QueueDoesNotExist);
+        }
+
+        // Now move the messages
+        if let Some(dlq_arn) = dead_letter_target_arn {
+            if !messages_to_move.is_empty() {
+                if let Some(mut dead_letter_queue) = state.queues.get_mut(&dlq_arn) {
+                    for mut msg in messages_to_move {
+                        msg.receipt_handle = None;
+                        dead_letter_queue.messages.push_back(msg);
+                    }
+                }
+            }
+        }
+
+        if !messages_to_return.is_empty() {
+            return Ok(ReceiveMessageResponse {
+                messages: messages_to_return,
+            });
         }
 
         if (Utc::now() - start_time).num_seconds() >= wait_time as i64 {
@@ -513,6 +561,23 @@ pub async fn set_queue_attributes(
 ) -> Result<(), SqsError> {
     match state.queues.get_mut(&request.queue_url) {
         Some(mut queue) => {
+            if let Some(policy_str) = request.attributes.get("RedrivePolicy") {
+                if policy_str.is_empty() {
+                    queue.redrive_policy = None;
+                } else {
+                    use crate::state::RedrivePolicy;
+                    match serde_json::from_str::<RedrivePolicy>(policy_str) {
+                        Ok(policy) => queue.redrive_policy = Some(policy),
+                        Err(e) => {
+                            return Err(SqsError::InvalidParameterValue(format!(
+                                "Invalid value for RedrivePolicy: {}",
+                                e
+                            )))
+                        }
+                    }
+                }
+            }
+
             for (key, value) in request.attributes {
                 queue.attributes.insert(key, value);
             }

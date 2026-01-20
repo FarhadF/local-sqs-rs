@@ -31,6 +31,14 @@ impl AppState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedrivePolicy {
+    #[serde(rename = "deadLetterTargetArn")]
+    pub dead_letter_target_arn: String,
+    #[serde(rename = "maxReceiveCount")]
+    pub max_receive_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Queue {
     pub name: String,
     pub url: String,
@@ -38,6 +46,8 @@ pub struct Queue {
     pub attributes: HashMap<String, String>,
     pub created_timestamp: i64,
     pub last_modified_timestamp: i64,
+    #[serde(default)]
+    pub redrive_policy: Option<RedrivePolicy>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +65,8 @@ pub struct Message {
     #[serde(skip)]
     pub visible_from: DateTime<Utc>,
     pub sent_timestamp: DateTime<Utc>,
+    #[serde(default)]
+    pub receive_count: u32,
 }
 
 
@@ -89,6 +101,7 @@ impl Message {
             md5_of_message_attributes,
             visible_from,
             sent_timestamp: Utc::now(),
+            receive_count: 0,
         }
     }
 }

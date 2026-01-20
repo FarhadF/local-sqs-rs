@@ -453,14 +453,14 @@ pub async fn receive_message(
                 }
 
                 if message.receipt_handle.is_none() && now >= message.visible_from {
-                    message.receive_count += 1;
-
                     if let Some(rp) = &redrive_policy {
                         if message.receive_count >= rp.max_receive_count {
                             messages_to_move.push(message);
                             continue;
                         }
                     }
+                    // this should be after redrive check so we dont redrive to dlq early
+                    message.receive_count += 1;
 
                     let mut message_clone = message.clone();
 
@@ -509,10 +509,21 @@ pub async fn receive_message(
         // Now move the messages
         if let Some(dlq_arn) = dead_letter_target_arn {
             if !messages_to_move.is_empty() {
-                if let Some(mut dead_letter_queue) = state.queues.get_mut(&dlq_arn) {
-                    for mut msg in messages_to_move {
-                        msg.receipt_handle = None;
-                        dead_letter_queue.messages.push_back(msg);
+                let dead_letter_queue_url = state
+                    .queues
+                    .iter()
+                    .find(|q| {
+                        let arn = format!("arn:aws:sqs:local:000000000000:{}", q.name);
+                        arn == dlq_arn
+                    })
+                    .map(|q| q.url.clone());
+
+                if let Some(url) = dead_letter_queue_url {
+                    if let Some(mut dead_letter_queue) = state.queues.get_mut(&url) {
+                        for mut msg in messages_to_move {
+                            msg.receipt_handle = None;
+                            dead_letter_queue.messages.push_back(msg);
+                        }
                     }
                 }
             }

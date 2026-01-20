@@ -7,6 +7,7 @@ use tracing::info;
 mod error;
 mod queue;
 mod state;
+mod serde_helpers;
 
 use state::AppState;
 

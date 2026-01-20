@@ -1,3 +1,4 @@
+use crate::serde_helpers;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use md5;
@@ -35,6 +36,8 @@ pub struct RedrivePolicy {
     #[serde(rename = "deadLetterTargetArn")]
     pub dead_letter_target_arn: String,
     #[serde(rename = "maxReceiveCount")]
+    #[serde(deserialize_with = "serde_helpers::deserialize_number_from_string")]
+    #[serde(serialize_with = "serde_helpers::serialize_number_to_string")]
     pub max_receive_count: u32,
 }
 

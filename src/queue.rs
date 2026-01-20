@@ -3,10 +3,24 @@ use crate::state::{AppState, Queue};
 use axum::extract::State;
 use axum::Json;
 use chrono::Utc;
+use crate::state::MessageAttributeValue;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::time::Duration;
 use uuid::Uuid;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ReceivedMessage {
+    #[serde(rename = "MessageId")]
+    pub message_id: String,
+    pub receipt_handle: String,
+    #[serde(rename = "MD5OfBody")]
+    pub md5_of_body: String,
+    pub body: String,
+    pub attributes: HashMap<String, String>,
+    pub message_attributes: HashMap<String, MessageAttributeValue>,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -303,9 +317,25 @@ pub async fn send_message(
 ) -> Result<SendMessageResponse, SqsError> {
     match state.queues.get_mut(&request.queue_url) {
         Some(mut queue) => {
+            let mut attributes = HashMap::new();
+            attributes.insert(
+                "SenderId".to_string(),
+                "AROASIVGLBUVGRUCIDMOF:botocore-session-1768915992".to_string(),
+            );
+            attributes.insert("ApproximateReceiveCount".to_string(), "0".to_string());
+            attributes.insert(
+                "SentTimestamp".to_string(),
+                Utc::now().timestamp_millis().to_string(),
+            );
+            attributes.insert(
+                "DeadLetterQueueSourceArn".to_string(),
+                "arn:aws:sqs:eu-central-1:156041415978:backend-sb1-fraud-persister-install-event-events"
+                    .to_string(),
+            );
+
             let message = crate::state::Message::new(
                 request.message_body,
-                HashMap::new(),
+                attributes,
                 request.message_attributes,
                 request.delay_seconds,
             );
@@ -443,6 +473,29 @@ pub async fn receive_message(
                     let receipt_handle = Uuid::new_v4().to_string();
                     message.receipt_handle = Some(receipt_handle.clone());
                     message_clone.receipt_handle = Some(receipt_handle);
+
+                    let mut receive_count = message
+                        .attributes
+                        .get("ApproximateReceiveCount")
+                        .and_then(|s| s.parse::<i32>().ok())
+                        .unwrap_or(0);
+                    receive_count += 1;
+
+                    if receive_count == 1 {
+                        message_clone.attributes.insert(
+                            "ApproximateFirstReceiveTimestamp".to_string(),
+                            Utc::now().timestamp_millis().to_string(),
+                        );
+                    }
+
+                    message.attributes.insert(
+                        "ApproximateReceiveCount".to_string(),
+                        receive_count.to_string(),
+                    );
+                    message_clone.attributes.insert(
+                        "ApproximateReceiveCount".to_string(),
+                        receive_count.to_string(),
+                    );
 
                     messages_to_return.push(message_clone);
                 }

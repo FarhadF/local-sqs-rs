@@ -53,10 +53,12 @@ pub struct Queue {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct Message {
+    #[serde(rename = "MessageId")]
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receipt_handle: Option<String>,
     pub body: String,
+    #[serde(rename = "MD5OfBody")]
     pub md5_of_body: String,
     pub attributes: HashMap<String, String>,
     #[serde(default)]

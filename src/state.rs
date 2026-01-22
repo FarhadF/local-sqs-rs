@@ -1,4 +1,5 @@
 use crate::serde_helpers;
+use bytes::BufMut;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use md5;
@@ -74,7 +75,6 @@ pub struct Message {
     pub receive_count: u32,
 }
 
-
 impl Message {
     pub fn new(
         body: String,
@@ -86,8 +86,44 @@ impl Message {
         let md5_of_message_attributes = if message_attributes.is_empty() {
             "".to_string()
         } else {
-            // A real implementation would serialize and hash the attributes
-            "".to_string()
+            let mut sorted_keys: Vec<_> = message_attributes.keys().collect();
+            sorted_keys.sort();
+
+            let mut buffer = Vec::new();
+
+            for key in sorted_keys {
+                if let Some(attr) = message_attributes.get(key) {
+                    // Name
+                    buffer.put_u32(key.len() as u32);
+                    buffer.put(key.as_bytes());
+
+                    // Data Type
+                    buffer.put_u32(attr.data_type.len() as u32);
+                    buffer.put(attr.data_type.as_bytes());
+
+                    // Value
+                    if attr.data_type.starts_with("String")
+                        || attr.data_type.starts_with("Number")
+                    {
+                        buffer.put_u8(1);
+                        if let Some(val) = &attr.string_value {
+                            buffer.put_u32(val.len() as u32);
+                            buffer.put(val.as_bytes());
+                        }
+                    } else if attr.data_type.starts_with("Binary") {
+                        buffer.put_u8(2);
+                        if let Some(val) = &attr.binary_value {
+                            use base64::{engine::general_purpose, Engine as _};
+                            if let Ok(decoded) = general_purpose::STANDARD.decode(val) {
+                                buffer.put_u32(decoded.len() as u32);
+                                buffer.put(decoded.as_slice());
+                            }
+                        }
+                    }
+                }
+            }
+
+            format!("{:x}", md5::compute(&buffer))
         };
 
         let visible_from = if let Some(delay) = delay_seconds {

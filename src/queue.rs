@@ -9,19 +9,6 @@ use std::collections::HashMap;
 use tokio::time::Duration;
 use uuid::Uuid;
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct ReceivedMessage {
-    #[serde(rename = "MessageId")]
-    pub message_id: String,
-    pub receipt_handle: String,
-    #[serde(rename = "MD5OfBody")]
-    pub md5_of_body: String,
-    pub body: String,
-    pub attributes: HashMap<String, String>,
-    pub message_attributes: HashMap<String, MessageAttributeValue>,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct CreateQueueRequest {
@@ -308,7 +295,11 @@ pub struct SendMessageRequest {
 #[serde(rename_all = "PascalCase")]
 pub struct SendMessageResponse {
     pub message_id: String,
+    #[serde(rename = "MD5OfMessageBody")]
     pub md5_of_message_body: String,
+    #[serde(rename = "MD5OfMessageAttributes")]
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub md5_of_message_attributes: String,
 }
 
 pub async fn send_message(
@@ -343,6 +334,7 @@ pub async fn send_message(
             let resp = SendMessageResponse {
                 message_id: message.id.clone(),
                 md5_of_message_body: message.md5_of_body.clone(),
+                md5_of_message_attributes: message.md5_of_message_attributes.clone(),
             };
             queue.messages.push_back(message);
 

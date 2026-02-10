@@ -30,7 +30,7 @@ pub async fn create_queue(
     Json(request): Json<CreateQueueRequest>,
 ) -> Result<CreateQueueResponse, SqsError> {
     let queue_name = request.queue_name;
-    let queue_url = format!("http://{}:{}/{}", state.host, state.port, &queue_name);
+    let queue_url = format!("http://{}:{}/000000000000/{}", state.host, state.port, &queue_name);
 
     if let Some(existing_queue) = state.queues.get(&queue_url) {
         if existing_queue.attributes != request.attributes {
@@ -106,7 +106,7 @@ pub async fn get_queue_url(
     Json(request): Json<GetQueueUrlRequest>,
 ) -> Result<GetQueueUrlResponse, SqsError> {
     let queue_name = request.queue_name;
-    let queue_url = format!("http://{}:{}/{}", state.host, state.port, queue_name);
+    let queue_url = format!("http://{}:{}/000000000000/{}", state.host, state.port, queue_name);
 
     if state.queues.contains_key(&queue_url) {
         Ok(GetQueueUrlResponse { queue_url })

@@ -19,6 +19,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/", post(handler))
+ //       .route("/*path", post(handler))
         .with_state(state.clone());
 
     let addr = format!("{}:{}", state.host, state.port);

@@ -1,9 +1,6 @@
 use crate::error::SqsError;
 use crate::state::{AppState, Queue};
-use axum::extract::State;
-use axum::Json;
 use chrono::Utc;
-use crate::state::MessageAttributeValue;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::time::Duration;
@@ -26,8 +23,8 @@ pub struct CreateQueueResponse {
 }
 
 pub async fn create_queue(
-    State(state): State<AppState>,
-    Json(request): Json<CreateQueueRequest>,
+    state: AppState,
+    request: CreateQueueRequest,
 ) -> Result<CreateQueueResponse, SqsError> {
     let queue_name = request.queue_name;
     let queue_url = format!("http://{}:{}/000000000000/{}", state.host, state.port, &queue_name);
@@ -80,6 +77,7 @@ pub async fn create_queue(
         url: queue_url.clone(),
         messages: Default::default(),
         attributes,
+        tags: request.tags,
         created_timestamp: now,
         last_modified_timestamp: now,
         redrive_policy,
@@ -102,8 +100,8 @@ pub struct GetQueueUrlResponse {
 }
 
 pub async fn get_queue_url(
-    State(state): State<AppState>,
-    Json(request): Json<GetQueueUrlRequest>,
+    state: AppState,
+    request: GetQueueUrlRequest,
 ) -> Result<GetQueueUrlResponse, SqsError> {
     let queue_name = request.queue_name;
     let queue_url = format!("http://{}:{}/000000000000/{}", state.host, state.port, queue_name);
@@ -128,8 +126,8 @@ pub struct ListQueuesResponse {
 }
 
 pub async fn list_queues(
-    State(state): State<AppState>,
-    Json(request): Json<ListQueuesRequest>,
+    state: AppState,
+    request: ListQueuesRequest,
 ) -> ListQueuesResponse {
     let mut queue_urls: Vec<String> = Vec::new();
     for queue in state.queues.iter() {
@@ -160,8 +158,8 @@ pub struct GetQueueAttributesResponse {
 }
 
 pub async fn get_queue_attributes(
-    State(state): State<AppState>,
-    Json(request): Json<GetQueueAttributesRequest>,
+    state: AppState,
+    request: GetQueueAttributesRequest,
 ) -> Result<GetQueueAttributesResponse, SqsError> {
     match state.queues.get(&request.queue_url) {
         Some(queue) => {
@@ -252,8 +250,8 @@ pub struct DeleteQueueRequest {
 }
 
 pub async fn delete_queue(
-    State(state): State<AppState>,
-    Json(request): Json<DeleteQueueRequest>,
+    state: AppState,
+    request: DeleteQueueRequest,
 ) -> Result<(), SqsError> {
     if state.queues.remove(&request.queue_url).is_none() {
         return Err(SqsError::QueueDoesNotExist);
@@ -268,8 +266,8 @@ pub struct PurgeQueueRequest {
 }
 
 pub async fn purge_queue(
-    State(state): State<AppState>,
-    Json(request): Json<PurgeQueueRequest>,
+    state: AppState,
+    request: PurgeQueueRequest,
 ) -> Result<(), SqsError> {
     match state.queues.get_mut(&request.queue_url) {
         Some(mut queue) => {
@@ -303,8 +301,8 @@ pub struct SendMessageResponse {
 }
 
 pub async fn send_message(
-    State(state): State<AppState>,
-    Json(request): Json<SendMessageRequest>,
+    state: AppState,
+    request: SendMessageRequest,
 ) -> Result<SendMessageResponse, SqsError> {
     match state.queues.get_mut(&request.queue_url) {
         Some(mut queue) => {
@@ -352,8 +350,8 @@ pub struct DeleteMessageRequest {
 }
 
 pub async fn delete_message(
-    State(state): State<AppState>,
-    Json(request): Json<DeleteMessageRequest>,
+    state: AppState,
+    request: DeleteMessageRequest,
 ) -> Result<(), SqsError> {
     match state.queues.get_mut(&request.queue_url) {
         Some(mut queue) => {
@@ -401,8 +399,8 @@ pub struct ReceiveMessageResponse {
 }
 
 pub async fn receive_message(
-    State(state): State<AppState>,
-    Json(request): Json<ReceiveMessageRequest>,
+    state: AppState,
+    request: ReceiveMessageRequest,
 ) -> Result<ReceiveMessageResponse, SqsError> {
     let wait_time = request.wait_time_seconds.unwrap_or(0);
     let start_time = Utc::now();
@@ -550,8 +548,8 @@ pub struct AddPermissionRequest {
 }
 
 pub async fn add_permission(
-    State(state): State<AppState>,
-    Json(request): Json<AddPermissionRequest>,
+    state: AppState,
+    request: AddPermissionRequest,
 ) -> Result<(), SqsError> {
     match state.queues.get_mut(&request.queue_url) {
         Some(mut queue) => {
@@ -612,8 +610,8 @@ pub struct SetQueueAttributesRequest {
 }
 
 pub async fn set_queue_attributes(
-    State(state): State<AppState>,
-    Json(request): Json<SetQueueAttributesRequest>,
+    state: AppState,
+    request: SetQueueAttributesRequest,
 ) -> Result<(), SqsError> {
     match state.queues.get_mut(&request.queue_url) {
         Some(mut queue) => {
@@ -638,6 +636,75 @@ pub async fn set_queue_attributes(
                 queue.attributes.insert(key, value);
             }
             queue.last_modified_timestamp = Utc::now().timestamp();
+            Ok(())
+        }
+        None => Err(SqsError::QueueDoesNotExist),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ListQueueTagsRequest {
+    pub queue_url: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ListQueueTagsResponse {
+    pub tags: HashMap<String, String>,
+}
+
+pub async fn list_queue_tags(
+    state: AppState,
+    request: ListQueueTagsRequest,
+) -> Result<ListQueueTagsResponse, SqsError> {
+    match state.queues.get(&request.queue_url) {
+        Some(queue) => Ok(ListQueueTagsResponse {
+            tags: queue.tags.clone(),
+        }),
+        None => Err(SqsError::QueueDoesNotExist),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct TagQueueRequest {
+    pub queue_url: String,
+    pub tags: HashMap<String, String>,
+}
+
+pub async fn tag_queue(
+    state: AppState,
+    request: TagQueueRequest,
+) -> Result<(), SqsError> {
+    match state.queues.get_mut(&request.queue_url) {
+        Some(mut queue) => {
+            for (k, v) in request.tags {
+                queue.tags.insert(k, v);
+            }
+            Ok(())
+        }
+        None => Err(SqsError::QueueDoesNotExist),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct UntagQueueRequest {
+    pub queue_url: String,
+    #[serde(rename = "TagKeys")]
+    pub tag_keys: Vec<String>,
+}
+
+pub async fn untag_queue(
+    state: AppState,
+    request: UntagQueueRequest,
+) -> Result<(), SqsError> {
+    match state.queues.get_mut(&request.queue_url) {
+        Some(mut queue) => {
+            for key in request.tag_keys {
+                queue.tags.remove(&key);
+            }
             Ok(())
         }
         None => Err(SqsError::QueueDoesNotExist),

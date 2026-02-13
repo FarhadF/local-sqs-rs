@@ -48,6 +48,8 @@ pub struct Queue {
     pub url: String,
     pub messages: VecDeque<Message>,
     pub attributes: HashMap<String, String>,
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
     pub created_timestamp: i64,
     pub last_modified_timestamp: i64,
     #[serde(default)]

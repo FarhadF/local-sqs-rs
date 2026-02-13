@@ -104,8 +104,7 @@ impl Message {
                     buffer.put(attr.data_type.as_bytes());
 
                     // Value
-                    if attr.data_type.starts_with("String")
-                        || attr.data_type.starts_with("Number")
+                    if attr.data_type.starts_with("String") || attr.data_type.starts_with("Number")
                     {
                         buffer.put_u8(1);
                         if let Some(val) = &attr.string_value {
@@ -115,7 +114,7 @@ impl Message {
                     } else if attr.data_type.starts_with("Binary") {
                         buffer.put_u8(2);
                         if let Some(val) = &attr.binary_value {
-                            use base64::{engine::general_purpose, Engine as _};
+                            use base64::{Engine as _, engine::general_purpose};
                             if let Ok(decoded) = general_purpose::STANDARD.decode(val) {
                                 buffer.put_u32(decoded.len() as u32);
                                 buffer.put(decoded.as_slice());

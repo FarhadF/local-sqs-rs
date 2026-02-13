@@ -27,7 +27,10 @@ pub async fn create_queue(
     request: CreateQueueRequest,
 ) -> Result<CreateQueueResponse, SqsError> {
     let queue_name = request.queue_name;
-    let queue_url = format!("http://{}:{}/000000000000/{}", state.host, state.port, &queue_name);
+    let queue_url = format!(
+        "http://{}:{}/000000000000/{}",
+        state.host, state.port, &queue_name
+    );
 
     if let Some(existing_queue) = state.queues.get(&queue_url) {
         if existing_queue.attributes != request.attributes {
@@ -65,7 +68,7 @@ pub async fn create_queue(
                 return Err(SqsError::InvalidParameterValue(format!(
                     "Invalid value for RedrivePolicy: {}",
                     e
-                )))
+                )));
             }
         },
         None => None,
@@ -104,7 +107,10 @@ pub async fn get_queue_url(
     request: GetQueueUrlRequest,
 ) -> Result<GetQueueUrlResponse, SqsError> {
     let queue_name = request.queue_name;
-    let queue_url = format!("http://{}:{}/000000000000/{}", state.host, state.port, queue_name);
+    let queue_url = format!(
+        "http://{}:{}/000000000000/{}",
+        state.host, state.port, queue_name
+    );
 
     if state.queues.contains_key(&queue_url) {
         Ok(GetQueueUrlResponse { queue_url })
@@ -125,10 +131,7 @@ pub struct ListQueuesResponse {
     pub queue_urls: Vec<String>,
 }
 
-pub async fn list_queues(
-    state: AppState,
-    request: ListQueuesRequest,
-) -> ListQueuesResponse {
+pub async fn list_queues(state: AppState, request: ListQueuesRequest) -> ListQueuesResponse {
     let mut queue_urls: Vec<String> = Vec::new();
     for queue in state.queues.iter() {
         if let Some(prefix) = &request.queue_name_prefix {
@@ -139,7 +142,6 @@ pub async fn list_queues(
             queue_urls.push(queue.value().url.clone());
         }
     }
-
 
     ListQueuesResponse { queue_urls }
 }
@@ -164,8 +166,9 @@ pub async fn get_queue_attributes(
     match state.queues.get(&request.queue_url) {
         Some(queue) => {
             let mut attributes = HashMap::new();
-            let requested_attributes =
-                request.attribute_names.unwrap_or_else(|| vec!["All".to_string()]);
+            let requested_attributes = request
+                .attribute_names
+                .unwrap_or_else(|| vec!["All".to_string()]);
 
             let all_requested = requested_attributes.contains(&"All".to_string());
 
@@ -242,17 +245,13 @@ pub async fn get_queue_attributes(
     }
 }
 
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct DeleteQueueRequest {
     pub queue_url: String,
 }
 
-pub async fn delete_queue(
-    state: AppState,
-    request: DeleteQueueRequest,
-) -> Result<(), SqsError> {
+pub async fn delete_queue(state: AppState, request: DeleteQueueRequest) -> Result<(), SqsError> {
     if state.queues.remove(&request.queue_url).is_none() {
         return Err(SqsError::QueueDoesNotExist);
     }
@@ -265,10 +264,7 @@ pub struct PurgeQueueRequest {
     pub queue_url: String,
 }
 
-pub async fn purge_queue(
-    state: AppState,
-    request: PurgeQueueRequest,
-) -> Result<(), SqsError> {
+pub async fn purge_queue(state: AppState, request: PurgeQueueRequest) -> Result<(), SqsError> {
     match state.queues.get_mut(&request.queue_url) {
         Some(mut queue) => {
             queue.messages.clear();
@@ -454,8 +450,9 @@ pub async fn receive_message(
 
                     let mut message_clone = message.clone();
 
-                    let visibility_timeout =
-                        request.visibility_timeout.unwrap_or(visibility_timeout_attr);
+                    let visibility_timeout = request
+                        .visibility_timeout
+                        .unwrap_or(visibility_timeout_attr);
 
                     message.visible_from =
                         Utc::now() + chrono::Duration::seconds(visibility_timeout as i64);
@@ -574,8 +571,7 @@ pub async fn add_permission(
                 });
 
             if !policy["Statement"].is_array() {
-                policy["Statement"] = serde_json::json!([
-                ]);
+                policy["Statement"] = serde_json::json!([]);
             }
 
             let statement = serde_json::json!({
@@ -588,10 +584,7 @@ pub async fn add_permission(
                 "Resource": format!("arn:aws:sqs:local:000000000000:{}", queue_name)
             });
 
-            policy["Statement"]
-                .as_array_mut()
-                .unwrap()
-                .push(statement);
+            policy["Statement"].as_array_mut().unwrap().push(statement);
 
             *policy_str = serde_json::to_string(&policy).unwrap();
 
@@ -626,7 +619,7 @@ pub async fn set_queue_attributes(
                             return Err(SqsError::InvalidParameterValue(format!(
                                 "Invalid value for RedrivePolicy: {}",
                                 e
-                            )))
+                            )));
                         }
                     }
                 }
@@ -673,10 +666,7 @@ pub struct TagQueueRequest {
     pub tags: HashMap<String, String>,
 }
 
-pub async fn tag_queue(
-    state: AppState,
-    request: TagQueueRequest,
-) -> Result<(), SqsError> {
+pub async fn tag_queue(state: AppState, request: TagQueueRequest) -> Result<(), SqsError> {
     match state.queues.get_mut(&request.queue_url) {
         Some(mut queue) => {
             for (k, v) in request.tags {
@@ -696,10 +686,7 @@ pub struct UntagQueueRequest {
     pub tag_keys: Vec<String>,
 }
 
-pub async fn untag_queue(
-    state: AppState,
-    request: UntagQueueRequest,
-) -> Result<(), SqsError> {
+pub async fn untag_queue(state: AppState, request: UntagQueueRequest) -> Result<(), SqsError> {
     match state.queues.get_mut(&request.queue_url) {
         Some(mut queue) => {
             for key in request.tag_keys {

@@ -1,15 +1,15 @@
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use axum::{extract::State, Json, Router};
-use tracing::info;
+use axum::{Json, Router, extract::State};
 use serde::Deserialize;
+use tracing::info;
 
 mod error;
 mod queue;
-mod state;
 mod serde_helpers;
 mod sns;
+mod state;
 
 use state::AppState;
 
@@ -37,11 +37,7 @@ struct ActionRequest {
     action: String,
 }
 
-async fn handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    body: String,
-) -> Response {
+async fn handler(State(state): State<AppState>, headers: HeaderMap, body: String) -> Response {
     let target = headers
         .get("X-Amz-Target")
         .and_then(|v| v.to_str().ok())
@@ -159,7 +155,8 @@ async fn handle_json(state: AppState, target: &str, body: &str) -> Response {
             }
         }
         "AmazonSNS.GetSubscriptionAttributes" => {
-            let request: sns::GetSubscriptionAttributesRequest = serde_json::from_str(body).unwrap();
+            let request: sns::GetSubscriptionAttributesRequest =
+                serde_json::from_str(body).unwrap();
             match sns::get_subscription_attributes(request).await {
                 Ok(response) => Json(response).into_response(),
                 Err(e) => e.into_response(),
@@ -167,7 +164,7 @@ async fn handle_json(state: AppState, target: &str, body: &str) -> Response {
         }
         "AmazonSNS.Subscribe" => {
             let request: sns::SubscribeRequest = serde_json::from_str(body).unwrap();
-             match sns::subscribe(request).await {
+            match sns::subscribe(request).await {
                 Ok(response) => Json(response).into_response(),
                 Err(e) => e.into_response(),
             }
@@ -181,23 +178,32 @@ async fn handle_json(state: AppState, target: &str, body: &str) -> Response {
 
 async fn handle_query(_state: AppState, body: &str) -> Response {
     let action_request: Result<ActionRequest, _> = serde_urlencoded::from_str(body);
-    
+
     let action = match action_request {
         Ok(req) => req.action,
-        Err(_) => return error::SqsError::InvalidAction("Unknown (failed to parse Action)".to_string()).into_response(),
+        Err(_) => {
+            return error::SqsError::InvalidAction("Unknown (failed to parse Action)".to_string())
+                .into_response();
+        }
     };
 
     info!("Handling Query request for Action: {}", action);
 
     match action.as_str() {
         "GetSubscriptionAttributes" => {
-            let request: sns::GetSubscriptionAttributesRequest = match serde_urlencoded::from_str(body) {
-                Ok(r) => r,
-                Err(e) => return error::SqsError::InvalidParameterValue(e.to_string()).into_response(),
-            };
+            let request: sns::GetSubscriptionAttributesRequest =
+                match serde_urlencoded::from_str(body) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return error::SqsError::InvalidParameterValue(e.to_string())
+                            .into_response();
+                    }
+                };
             match sns::get_subscription_attributes(request).await {
                 Ok(response) => {
-                    let mut xml = String::from("<GetSubscriptionAttributesResponse xmlns=\"http://sns.amazonaws.com/doc/2010-03-31/\">\n");
+                    let mut xml = String::from(
+                        "<GetSubscriptionAttributesResponse xmlns=\"http://sns.amazonaws.com/doc/2010-03-31/\">\n",
+                    );
                     xml.push_str("  <GetSubscriptionAttributesResult>\n");
                     xml.push_str("    <Attributes>\n");
                     for (k, v) in response.attributes {
@@ -209,21 +215,24 @@ async fn handle_query(_state: AppState, body: &str) -> Response {
                     xml.push_str("    </Attributes>\n");
                     xml.push_str("  </GetSubscriptionAttributesResult>\n");
                     xml.push_str("  <ResponseMetadata>\n");
-                    xml.push_str(&format!("    <RequestId>{}</RequestId>\n", uuid::Uuid::new_v4()));
+                    xml.push_str(&format!(
+                        "    <RequestId>{}</RequestId>\n",
+                        uuid::Uuid::new_v4()
+                    ));
                     xml.push_str("  </ResponseMetadata>\n");
                     xml.push_str("</GetSubscriptionAttributesResponse>");
-                    
+
                     ([(axum::http::header::CONTENT_TYPE, "application/xml")], xml).into_response()
                 }
                 Err(e) => e.into_response(), // SqsError needs update to support XML or we manual format here?
-                // SqsError returns JSON. We should ideally return XML here.
-                // For now, let's just use JSON error, maybe Terraform can handle it or we update SqsError later.
+                                             // SqsError returns JSON. We should ideally return XML here.
+                                             // For now, let's just use JSON error, maybe Terraform can handle it or we update SqsError later.
             }
         }
         "Subscribe" => {
-             // For Subscribe, we try to parse. Note: serde_urlencoded might fail on Attributes map.
-             // We defined SubscribeRequest with minimal fields to avoid this.
-             let request: sns::SubscribeRequest = match serde_urlencoded::from_str(body) {
+            // For Subscribe, we try to parse. Note: serde_urlencoded might fail on Attributes map.
+            // We defined SubscribeRequest with minimal fields to avoid this.
+            let request: sns::SubscribeRequest = match serde_urlencoded::from_str(body) {
                 Ok(r) => r,
                 Err(e) => {
                     // If deserialization fails, it might be due to ignored fields or map format.
@@ -235,18 +244,26 @@ async fn handle_query(_state: AppState, body: &str) -> Response {
             };
             match sns::subscribe(request).await {
                 Ok(response) => {
-                     let mut xml = String::from("<SubscribeResponse xmlns=\"http://sns.amazonaws.com/doc/2010-03-31/\">\n");
-                     xml.push_str("  <SubscribeResult>\n");
-                     xml.push_str(&format!("    <SubscriptionArn>{}</SubscriptionArn>\n", response.subscription_arn));
-                     xml.push_str("  </SubscribeResult>\n");
-                     xml.push_str("  <ResponseMetadata>\n");
-                     xml.push_str(&format!("    <RequestId>{}</RequestId>\n", uuid::Uuid::new_v4()));
-                     xml.push_str("  </ResponseMetadata>\n");
-                     xml.push_str("</SubscribeResponse>");
-                     
-                     ([(axum::http::header::CONTENT_TYPE, "application/xml")], xml).into_response()
+                    let mut xml = String::from(
+                        "<SubscribeResponse xmlns=\"http://sns.amazonaws.com/doc/2010-03-31/\">\n",
+                    );
+                    xml.push_str("  <SubscribeResult>\n");
+                    xml.push_str(&format!(
+                        "    <SubscriptionArn>{}</SubscriptionArn>\n",
+                        response.subscription_arn
+                    ));
+                    xml.push_str("  </SubscribeResult>\n");
+                    xml.push_str("  <ResponseMetadata>\n");
+                    xml.push_str(&format!(
+                        "    <RequestId>{}</RequestId>\n",
+                        uuid::Uuid::new_v4()
+                    ));
+                    xml.push_str("  </ResponseMetadata>\n");
+                    xml.push_str("</SubscribeResponse>");
+
+                    ([(axum::http::header::CONTENT_TYPE, "application/xml")], xml).into_response()
                 }
-                 Err(e) => e.into_response(),
+                Err(e) => e.into_response(),
             }
         }
         // TODO: Add SQS actions here if needed for full Terraform support

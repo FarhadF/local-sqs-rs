@@ -1,6 +1,6 @@
-use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use serde_json::json;
 
 pub enum SqsError {
@@ -22,7 +22,7 @@ impl IntoResponse for SqsError {
             ),
             SqsError::QueueDoesNotExist => (
                 StatusCode::BAD_REQUEST,
-                "QueueDoesNotExist",
+                "AWS.SimpleQueueService.NonExistentQueue",
                 "The specified queue does not exist.".to_string(),
             ),
             SqsError::InvalidParameterValue(msg) => {

@@ -159,11 +159,23 @@ pub struct GetQueueAttributesResponse {
     pub attributes: HashMap<String, String>,
 }
 
+fn resolve_queue_url(state: &AppState, queue_url: &str) -> String {
+    if let Some(queue_name) = queue_url.split('/').last() {
+        format!(
+            "http://{}:{}/000000000000/{}",
+            state.host, state.port, queue_name
+        )
+    } else {
+        queue_url.to_string()
+    }
+}
+
 pub async fn get_queue_attributes(
     state: AppState,
     request: GetQueueAttributesRequest,
 ) -> Result<GetQueueAttributesResponse, SqsError> {
-    match state.queues.get(&request.queue_url) {
+    let queue_url = resolve_queue_url(&state, &request.queue_url);
+    match state.queues.get(&queue_url) {
         Some(queue) => {
             let mut attributes = HashMap::new();
             let requested_attributes = request
@@ -252,7 +264,8 @@ pub struct DeleteQueueRequest {
 }
 
 pub async fn delete_queue(state: AppState, request: DeleteQueueRequest) -> Result<(), SqsError> {
-    if state.queues.remove(&request.queue_url).is_none() {
+    let queue_url = resolve_queue_url(&state, &request.queue_url);
+    if state.queues.remove(&queue_url).is_none() {
         return Err(SqsError::QueueDoesNotExist);
     }
     Ok(())
@@ -265,7 +278,8 @@ pub struct PurgeQueueRequest {
 }
 
 pub async fn purge_queue(state: AppState, request: PurgeQueueRequest) -> Result<(), SqsError> {
-    match state.queues.get_mut(&request.queue_url) {
+    let queue_url = resolve_queue_url(&state, &request.queue_url);
+    match state.queues.get_mut(&queue_url) {
         Some(mut queue) => {
             queue.messages.clear();
             Ok(())
@@ -300,7 +314,8 @@ pub async fn send_message(
     state: AppState,
     request: SendMessageRequest,
 ) -> Result<SendMessageResponse, SqsError> {
-    match state.queues.get_mut(&request.queue_url) {
+    let queue_url = resolve_queue_url(&state, &request.queue_url);
+    match state.queues.get_mut(&queue_url) {
         Some(mut queue) => {
             let mut attributes = HashMap::new();
             attributes.insert(
@@ -349,7 +364,8 @@ pub async fn delete_message(
     state: AppState,
     request: DeleteMessageRequest,
 ) -> Result<(), SqsError> {
-    match state.queues.get_mut(&request.queue_url) {
+    let queue_url = resolve_queue_url(&state, &request.queue_url);
+    match state.queues.get_mut(&queue_url) {
         Some(mut queue) => {
             let mut message_found = false;
             queue.messages.retain(|m| {
@@ -400,6 +416,7 @@ pub async fn receive_message(
 ) -> Result<ReceiveMessageResponse, SqsError> {
     let wait_time = request.wait_time_seconds.unwrap_or(0);
     let start_time = Utc::now();
+    let queue_url = resolve_queue_url(&state, &request.queue_url);
 
     loop {
         let redrive_policy;
@@ -407,7 +424,7 @@ pub async fn receive_message(
         let mut messages_to_move = Vec::new();
         let mut messages_to_return = Vec::new();
 
-        if let Some(mut queue) = state.queues.get_mut(&request.queue_url) {
+        if let Some(mut queue) = state.queues.get_mut(&queue_url) {
             let now = Utc::now();
 
             // Reset visibility for messages that have timed out
@@ -548,7 +565,8 @@ pub async fn add_permission(
     state: AppState,
     request: AddPermissionRequest,
 ) -> Result<(), SqsError> {
-    match state.queues.get_mut(&request.queue_url) {
+    let queue_url = resolve_queue_url(&state, &request.queue_url);
+    match state.queues.get_mut(&queue_url) {
         Some(mut queue) => {
             let queue_name = queue.name.clone();
             let policy_str = queue
@@ -606,7 +624,8 @@ pub async fn set_queue_attributes(
     state: AppState,
     request: SetQueueAttributesRequest,
 ) -> Result<(), SqsError> {
-    match state.queues.get_mut(&request.queue_url) {
+    let queue_url = resolve_queue_url(&state, &request.queue_url);
+    match state.queues.get_mut(&queue_url) {
         Some(mut queue) => {
             if let Some(policy_str) = request.attributes.get("RedrivePolicy") {
                 if policy_str.is_empty() {
@@ -651,7 +670,8 @@ pub async fn list_queue_tags(
     state: AppState,
     request: ListQueueTagsRequest,
 ) -> Result<ListQueueTagsResponse, SqsError> {
-    match state.queues.get(&request.queue_url) {
+    let queue_url = resolve_queue_url(&state, &request.queue_url);
+    match state.queues.get(&queue_url) {
         Some(queue) => Ok(ListQueueTagsResponse {
             tags: queue.tags.clone(),
         }),
@@ -667,7 +687,8 @@ pub struct TagQueueRequest {
 }
 
 pub async fn tag_queue(state: AppState, request: TagQueueRequest) -> Result<(), SqsError> {
-    match state.queues.get_mut(&request.queue_url) {
+    let queue_url = resolve_queue_url(&state, &request.queue_url);
+    match state.queues.get_mut(&queue_url) {
         Some(mut queue) => {
             for (k, v) in request.tags {
                 queue.tags.insert(k, v);
@@ -687,7 +708,8 @@ pub struct UntagQueueRequest {
 }
 
 pub async fn untag_queue(state: AppState, request: UntagQueueRequest) -> Result<(), SqsError> {
-    match state.queues.get_mut(&request.queue_url) {
+    let queue_url = resolve_queue_url(&state, &request.queue_url);
+    match state.queues.get_mut(&queue_url) {
         Some(mut queue) => {
             for key in request.tag_keys {
                 queue.tags.remove(&key);

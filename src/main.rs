@@ -15,7 +15,12 @@ use state::AppState;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
 
     let state = AppState::new();
 
@@ -25,9 +30,9 @@ async fn main() {
         .with_state(state.clone());
 
     let addr = format!("{}:{}", state.host, state.port);
-    info!("listening on {}", addr);
-
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let local_addr = listener.local_addr().unwrap();
+    info!("server listening on port {}", local_addr.port());
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -42,9 +47,6 @@ async fn handler(State(state): State<AppState>, headers: HeaderMap, body: String
         .get("X-Amz-Target")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-
-    info!("Headers: {:?}", headers);
-    info!("Body: {}", body);
 
     if let Some(target) = target {
         // AWS JSON Protocol
